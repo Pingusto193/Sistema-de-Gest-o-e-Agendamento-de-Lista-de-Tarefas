@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "tsx --test src/security.test.ts",
+    "db:seed": "prisma db seed",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [],
   "author": "",
@@ -16,10 +18,12 @@
     "bcryptjs": "^3.0.3",
     "dotenv": "^18.0.7",
     "pg": "^8.23.1",
-    "prisma": "^7.8.0"
+    "prisma": "^7.10.0"
   },
   "devDependencies": {
+    "@types/node": "^26.6.5",
     "nodemon": "^3.1.14",
-    "tsx": "^4.23.15"
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   }
 }

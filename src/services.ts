@@ -14,10 +14,10 @@ export async function loginUsuario(
 ): Promise<{ token: string; usuario: { id: number; nome: string; login: string } } | null> {
   const usuario = await prisma.usuario.findUnique({
     where: { login },
-    select: { id: true, nome: true, login: true, senha: true },
+    select: { id: true, nome: true, login: true, senhaHash: true },
   });
 
-  if (!usuario || !(await verifyPassword(senha, usuario.senha))) {
+  if (!usuario || !(await verifyPassword(senha, usuario.senhaHash))) {
     return null;
   }
 
