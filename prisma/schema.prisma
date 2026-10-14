@@ -11,19 +11,20 @@ datasource db {
 }
 
 model Usuario {
-  id    Int    @id @default(autoincrement())
-  nome  String
-  login String
-  senha String
+  id       Int            @id @default(autoincrement())
+  nome     String
+  login    String         @unique
+  senha    String
+  sessoes  SessaoUsuario[]
 
   @@map("usuarios")
 }
 
 model Colaborador {
-  id      Int      @id @default(autoincrement())
+  id      Int       @id @default(autoincrement())
   nome    String
   cpf     String
-  email   String
+  email   String    @unique
   tarefas Tarefa[]
 
   @@map("colaboradores")
@@ -48,4 +49,16 @@ model Agendamento {
   tarefa       Tarefa   @relation(fields: [id_tarefa], references: [id])
 
   @@map("agendamentos")
+}
+
+model SessaoUsuario {
+  id             Int      @id @default(autoincrement())
+  tokenHash      String   @unique
+  usuarioId      Int
+  loginAt        DateTime @default(now())
+  lastActivityAt DateTime @default(now())
+  usuario        Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId])
+  @@map("sessoes_usuarios")
 }
