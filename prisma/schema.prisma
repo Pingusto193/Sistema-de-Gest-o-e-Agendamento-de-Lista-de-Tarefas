@@ -1,0 +1,51 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Usuario {
+  id    Int    @id @default(autoincrement())
+  nome  String
+  login String
+  senha String
+
+  @@map("usuarios")
+}
+
+model Colaborador {
+  id      Int      @id @default(autoincrement())
+  nome    String
+  cpf     String
+  email   String
+  tarefas Tarefa[]
+
+  @@map("colaboradores")
+}
+
+model Tarefa {
+  id             Int           @id @default(autoincrement())
+  titulo         String
+  descricao      String
+  status         String
+  id_colaborador Int
+  colaborador    Colaborador   @relation(fields: [id_colaborador], references: [id])
+  agendamentos   Agendamento[]
+
+  @@map("tarefas")
+}
+
+model Agendamento {
+  id           Int      @id @default(autoincrement())
+  id_tarefa    Int
+  data_entrega DateTime
+  tarefa       Tarefa   @relation(fields: [id_tarefa], references: [id])
+
+  @@map("agendamentos")
+}
