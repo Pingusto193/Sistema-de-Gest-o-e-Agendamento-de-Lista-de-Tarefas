@@ -9,5 +9,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "prisma/seed.ts"]
+  "include": ["src/**/*.ts", "sistema/**/*.ts", "prisma/criar-banco.ts"]
 }

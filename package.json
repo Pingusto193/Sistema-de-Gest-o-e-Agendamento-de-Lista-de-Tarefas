@@ -4,8 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "dev": "tsx sistema/server.ts",
     "test": "tsx --test src/security.test.ts",
-    "db:seed": "prisma db seed",
+    "db": "tsx prisma/criar-banco.ts",
+    "postinstall": "prisma generate",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [],
@@ -15,14 +17,15 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
+    "@types/express": "^5.0.6",
     "bcryptjs": "^3.0.3",
     "dotenv": "^18.0.7",
+    "express": "^5.3.0",
     "pg": "^8.23.1",
     "prisma": "^7.10.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
-    "nodemon": "^3.1.14",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }
