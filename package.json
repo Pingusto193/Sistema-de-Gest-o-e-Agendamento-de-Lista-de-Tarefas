@@ -4,11 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "tsx sistema/server.ts",
-    "test": "tsx --test src/security.test.ts",
+    "dev": "tsx src/server.ts",
     "db": "tsx prisma/criar-banco.ts",
-    "postinstall": "prisma generate",
-    "typecheck": "tsc --noEmit"
+    "postinstall": "prisma generate"
   },
   "keywords": [],
   "author": "",

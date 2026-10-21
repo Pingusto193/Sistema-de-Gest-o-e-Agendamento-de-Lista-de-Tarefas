@@ -12,33 +12,14 @@ CREATE TABLE "usuarios" (
 );
 
 -- CreateTable
-CREATE TABLE "colaboradores" (
-    "id" SERIAL NOT NULL,
-    "nome" TEXT NOT NULL,
-    "cpf" TEXT NOT NULL,
-    "email" TEXT NOT NULL,
-
-    CONSTRAINT "colaboradores_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "tarefas" (
     "id" SERIAL NOT NULL,
     "titulo" TEXT NOT NULL,
     "descricao" TEXT NOT NULL,
     "status" TEXT NOT NULL,
-    "id_colaborador" INTEGER NOT NULL,
+    "usuario_id" INTEGER NOT NULL,
 
     CONSTRAINT "tarefas_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "agendamentos" (
-    "id" SERIAL NOT NULL,
-    "id_tarefa" INTEGER NOT NULL,
-    "data_entrega" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "agendamentos_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -56,7 +37,7 @@ CREATE TABLE "sessoes_usuarios" (
 CREATE UNIQUE INDEX "usuarios_login_key" ON "usuarios"("login");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "colaboradores_email_key" ON "colaboradores"("email");
+CREATE INDEX "tarefas_usuario_id_idx" ON "tarefas"("usuario_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "sessoes_usuarios_token_hash_key" ON "sessoes_usuarios"("token_hash");
@@ -65,11 +46,7 @@ CREATE UNIQUE INDEX "sessoes_usuarios_token_hash_key" ON "sessoes_usuarios"("tok
 CREATE INDEX "sessoes_usuarios_usuario_id_idx" ON "sessoes_usuarios"("usuario_id");
 
 -- AddForeignKey
-ALTER TABLE "tarefas" ADD CONSTRAINT "tarefas_id_colaborador_fkey" FOREIGN KEY ("id_colaborador") REFERENCES "colaboradores"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "agendamentos" ADD CONSTRAINT "agendamentos_id_tarefa_fkey" FOREIGN KEY ("id_tarefa") REFERENCES "tarefas"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "tarefas" ADD CONSTRAINT "tarefas_usuario_id_fkey" FOREIGN KEY ("usuario_id") REFERENCES "usuarios"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "sessoes_usuarios" ADD CONSTRAINT "sessoes_usuarios_usuario_id_fkey" FOREIGN KEY ("usuario_id") REFERENCES "usuarios"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-

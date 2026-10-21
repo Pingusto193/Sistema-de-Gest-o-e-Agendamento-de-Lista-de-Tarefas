@@ -2,7 +2,7 @@ import "dotenv/config";
 import { readFileSync } from "node:fs";
 import pg from "pg";
 
-// Cria o banco (se ainda não existir) e roda o saep_db.sql nele.
+// Cria o banco (se ainda não existir) e cria as tabelas nele.
 const url = new URL(process.env.DATABASE_URL ?? "");
 const nomeBanco = decodeURIComponent(url.pathname.slice(1));
 
@@ -19,7 +19,11 @@ await servidor.end();
 
 const banco = new pg.Client({ connectionString: url.href });
 await banco.connect();
-await banco.query(readFileSync("saep_db.sql", "utf8"));
+// Apaga as tabelas antigas (inclusive as da versão anterior), para o script poder rodar de novo
+await banco.query(
+  `DROP TABLE IF EXISTS "sessoes_usuarios", "agendamentos", "tarefas", "colaboradores", "usuarios" CASCADE`,
+);
+await banco.query(readFileSync("prisma/migrations/20261014111149_init/migration.sql", "utf8"));
 await banco.end();
 
-console.info(`Banco ${nomeBanco} criado e populado.`);
+console.info(`Banco ${nomeBanco} criado.`);

@@ -16,39 +16,21 @@ model Usuario {
   login     String          @unique
   senhaHash String          @map("senha")
   sessoes   SessaoUsuario[]
+  tarefas   Tarefa[]
 
   @@map("usuarios")
 }
 
-model Colaborador {
-  id         Int      @id @default(autoincrement())
-  nome       String
-  cpfCifrado String   @map("cpf")
-  email      String   @unique
-  tarefas    Tarefa[]
-
-  @@map("colaboradores")
-}
-
 model Tarefa {
-  id             Int           @id @default(autoincrement())
-  titulo         String
-  descricao      String
-  status         String
-  id_colaborador Int
-  colaborador    Colaborador   @relation(fields: [id_colaborador], references: [id])
-  agendamentos   Agendamento[]
+  id        Int     @id @default(autoincrement())
+  titulo    String
+  descricao String
+  status    String
+  usuarioId Int     @map("usuario_id")
+  usuario   Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
 
+  @@index([usuarioId])
   @@map("tarefas")
-}
-
-model Agendamento {
-  id           Int      @id @default(autoincrement())
-  id_tarefa    Int
-  data_entrega DateTime
-  tarefa       Tarefa   @relation(fields: [id_tarefa], references: [id])
-
-  @@map("agendamentos")
 }
 
 model SessaoUsuario {

@@ -1,17 +1,13 @@
+import { createHash, randomBytes } from "node:crypto";
+import bcrypt from "bcryptjs";
 import express, { type NextFunction, type Request, type Response } from "express";
-import {
-  buscarColaboradoresPorNome,
-  cadastrarColaborador,
-  cadastrarTarefa,
-  cadastrarUsuario,
-  encerrarSessao,
-  listarAgendamentos,
-  listarTarefas,
-  loginUsuario,
-  obterSessaoAtiva,
-} from "../src/services";
+import { prisma } from "./lib/prisma";
 
 type Usuario = { id: number; nome: string; login: string };
+type DadosTarefa = { titulo: string; descricao: string; status: string };
+
+const INATIVIDADE_MS = 30 * 60 * 1000;
+const STATUS = ["Pendente", "Em andamento", "Concluída"];
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
@@ -19,7 +15,8 @@ app.use(express.urlencoded({ extended: false }));
 const esc = (v: unknown) =>
   String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-const data = (d: Date) => d.toLocaleDateString("pt-BR", { timeZone: "UTC" });
+const hashToken = (token: string) =>
+  createHash("sha256").update(token).digest("hex");
 
 function pegarToken(req: Request): string | undefined {
   return req.headers.cookie
@@ -32,10 +29,6 @@ function pagina(titulo: string, corpo: string, usuario?: Usuario) {
   const menu = usuario
     ? `<nav>
         <b>${esc(usuario.nome)}</b> |
-        <a href="/">Painel</a> |
-        <a href="/colaboradores">Colaboradores</a> |
-        <a href="/tarefas">Tarefas</a> |
-        <a href="/agendamento">Agendamento</a> |
         <form method="post" action="/logout" style="display:inline"><button>Sair</button></form>
       </nav><hr>`
     : "";
@@ -45,20 +38,13 @@ function pagina(titulo: string, corpo: string, usuario?: Usuario) {
 <body>${menu}<h1>${esc(titulo)}</h1>${corpo}</body></html>`;
 }
 
-const tabela = (cabecalho: string[], linhas: string[]) =>
-  `<table border="1" cellpadding="4">
-    <tr>${cabecalho.map((c) => `<th>${c}</th>`).join("")}</tr>
-    ${linhas.join("") || `<tr><td colspan="${cabecalho.length}">Nenhum registro.</td></tr>`}
-  </table>`;
-
-const linha = (...colunas: unknown[]) =>
-  `<tr>${colunas.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`;
+const mensagemErro = (erro: string) => (erro ? `<p style="color:red">${esc(erro)}</p>` : "");
 
 // ---------- Login ----------
 const formLogin = (erro = "") =>
   pagina(
     "Login",
-    `${erro ? `<p style="color:red">${esc(erro)}</p>` : ""}
+    `${mensagemErro(erro)}
     <form method="post" action="/login">
       <p><label>Usuário <input name="login" required></label></p>
       <p><label>Senha <input name="senha" type="password" required></label></p>
@@ -67,13 +53,16 @@ const formLogin = (erro = "") =>
     <p><a href="/cadastro">Criar conta</a></p>`,
   );
 
-// Abre a sessão e vai para o painel. Devolve false se usuário ou senha estiverem errados.
+// Abre a sessão e vai para as tarefas. Devolve false se usuário ou senha estiverem errados.
 async function entrar(res: Response, login: string, senha: string) {
-  const resultado = await loginUsuario(login, senha);
-  if (!resultado) {
+  const usuario = await prisma.usuario.findUnique({ where: { login } });
+  if (!usuario || !(await bcrypt.compare(senha, usuario.senhaHash))) {
     return false;
   }
-  res.setHeader("Set-Cookie", `sessao=${resultado.token}; HttpOnly; SameSite=Lax; Path=/`);
+
+  const token = randomBytes(32).toString("base64url");
+  await prisma.sessaoUsuario.create({ data: { tokenHash: hashToken(token), usuarioId: usuario.id } });
+  res.setHeader("Set-Cookie", `sessao=${token}; HttpOnly; SameSite=Lax; Path=/`);
   res.redirect("/");
   return true;
 }
@@ -92,7 +81,7 @@ app.post("/login", async (req, res) => {
 const formCadastro = (erro = "") =>
   pagina(
     "Criar conta",
-    `${erro ? `<p style="color:red">${esc(erro)}</p>` : ""}
+    `${mensagemErro(erro)}
     <form method="post" action="/cadastro">
       <p><label>Nome <input name="nome" required></label></p>
       <p><label>Usuário <input name="login" required></label></p>
@@ -115,17 +104,18 @@ app.post("/cadastro", async (req, res) => {
     res.status(400).send(formCadastro("Preencha tudo. A senha precisa ter pelo menos 8 caracteres."));
     return;
   }
-  if (!(await cadastrarUsuario(nome, login, senha))) {
+  if (await prisma.usuario.findUnique({ where: { login } })) {
     res.status(400).send(formCadastro("Esse usuário já existe. Escolha outro."));
     return;
   }
+  await prisma.usuario.create({ data: { nome, login, senhaHash: await bcrypt.hash(senha, 12) } });
   await entrar(res, login, senha);
 });
 
 app.post("/logout", async (req, res) => {
   const token = pegarToken(req);
   if (token) {
-    await encerrarSessao(token);
+    await prisma.sessaoUsuario.deleteMany({ where: { tokenHash: hashToken(token) } });
   }
   res.setHeader("Set-Cookie", "sessao=; Max-Age=0; Path=/");
   res.redirect("/login");
@@ -134,142 +124,131 @@ app.post("/logout", async (req, res) => {
 // ---------- Tudo abaixo exige login ----------
 app.use(async (req: Request, res: Response, next: NextFunction) => {
   const token = pegarToken(req);
-  const sessao = token ? await obterSessaoAtiva(token) : null;
+  const sessao = token
+    ? await prisma.sessaoUsuario.findUnique({
+        where: { tokenHash: hashToken(token) },
+        include: { usuario: { select: { id: true, nome: true, login: true } } },
+      })
+    : null;
   if (!sessao) {
     res.redirect("/login");
     return;
   }
+  if (Date.now() - sessao.lastActivityAt.getTime() >= INATIVIDADE_MS) {
+    await prisma.sessaoUsuario.delete({ where: { id: sessao.id } });
+    res.redirect("/login");
+    return;
+  }
+  await prisma.sessaoUsuario.update({ where: { id: sessao.id }, data: { lastActivityAt: new Date() } });
   res.locals.usuario = sessao.usuario;
   next();
 });
 
-// ---------- Painel ----------
-app.get("/", (_req, res) => {
-  const usuario: Usuario = res.locals.usuario;
-  res.send(
-    pagina(
-      "Painel",
-      `<p>Olá, ${esc(usuario.nome)}!</p>
-      <ul>
-        <li><a href="/colaboradores">Colaboradores</a></li>
-        <li><a href="/tarefas">Tarefas</a></li>
-        <li><a href="/agendamento">Agendamento</a></li>
-      </ul>`,
-      usuario,
-    ),
-  );
-});
-
-// ---------- Colaboradores ----------
-async function telaColaboradores(req: Request, res: Response, erro = "") {
-  const busca = String(req.query.busca ?? "");
-  const lista = await buscarColaboradoresPorNome(busca);
-
-  res.send(
-    pagina(
-      "Colaboradores",
-      `<form method="get">
-        <input name="busca" placeholder="Buscar por nome" value="${esc(busca)}">
-        <button>Buscar</button>
-      </form>
-      ${tabela(["Nome", "CPF", "E-mail"], lista.map((c) => linha(c.nome, c.cpf, c.email)))}
-      <h2>Novo colaborador</h2>
-      ${erro ? `<p style="color:red">${esc(erro)}</p>` : ""}
-      <form method="post">
-        <p><label>Nome <input name="nome" required></label></p>
-        <p><label>CPF <input name="cpf" required></label></p>
-        <p><label>E-mail <input name="email" type="email" required></label></p>
-        <button>Cadastrar</button>
-      </form>`,
-      res.locals.usuario,
-    ),
-  );
-}
-
-app.get("/colaboradores", (req, res) => telaColaboradores(req, res));
-
-app.post("/colaboradores", async (req, res) => {
-  try {
-    await cadastrarColaborador(
-      String(req.body.nome).trim(),
-      String(req.body.cpf).trim(),
-      String(req.body.email).trim(),
-    );
-    res.redirect("/colaboradores");
-  } catch {
-    await telaColaboradores(req, res, "Não foi possível cadastrar (e-mail já existe?).");
-  }
-});
-
 // ---------- Tarefas ----------
-async function telaTarefas(_req: Request, res: Response, erro = "") {
-  const [tarefas, colaboradores] = await Promise.all([
-    listarTarefas(),
-    buscarColaboradoresPorNome(""),
-  ]);
-  const opcoes = colaboradores
-    .map((c) => `<option value="${c.id}">${esc(c.nome)}</option>`)
-    .join("");
+// Toda consulta de tarefa filtra pelo usuário logado, para ninguém mexer na tarefa de outro.
+const lerTarefa = (req: Request): DadosTarefa => ({
+  titulo: String(req.body.titulo ?? "").trim(),
+  descricao: String(req.body.descricao ?? "").trim(),
+  status: String(req.body.status ?? ""),
+});
+
+const tarefaValida = (t: DadosTarefa) => t.titulo !== "" && t.descricao !== "" && STATUS.includes(t.status);
+
+const idTarefa = (req: Request) => Number.parseInt(String(req.params.id), 10) || 0;
+
+const formTarefa = (acao: string, botao: string, t?: DadosTarefa) =>
+  `<form method="post" action="${acao}">
+    <p><label>Título <input name="titulo" value="${esc(t?.titulo ?? "")}" required></label></p>
+    <p><label>Descrição <input name="descricao" value="${esc(t?.descricao ?? "")}" required></label></p>
+    <p><label>Status
+      <select name="status">
+        ${STATUS.map((s) => `<option${s === t?.status ? " selected" : ""}>${s}</option>`).join("")}
+      </select></label></p>
+    <button>${botao}</button>
+  </form>`;
+
+async function telaTarefas(res: Response, erro = "") {
+  const usuario: Usuario = res.locals.usuario;
+  const tarefas = await prisma.tarefa.findMany({ where: { usuarioId: usuario.id }, orderBy: { id: "desc" } });
+  const linhas = tarefas.map(
+    (t) => `<tr>
+      <td>${esc(t.titulo)}</td><td>${esc(t.descricao)}</td><td>${esc(t.status)}</td>
+      <td>
+        <a href="/tarefas/${t.id}">Editar</a>
+        <form method="post" action="/tarefas/${t.id}/excluir" style="display:inline"
+          onsubmit="return confirm('Excluir esta tarefa?')"><button>Excluir</button></form>
+      </td>
+    </tr>`,
+  );
 
   res.send(
     pagina(
       "Tarefas",
-      `${tabela(
-        ["Título", "Descrição", "Status", "Responsável"],
-        tarefas.map((t) => linha(t.titulo, t.descricao, t.status, t.colaborador.nome)),
-      )}
+      `<table border="1" cellpadding="4">
+        <tr><th>Título</th><th>Descrição</th><th>Status</th><th></th></tr>
+        ${linhas.join("") || `<tr><td colspan="4">Nenhuma tarefa.</td></tr>`}
+      </table>
       <h2>Nova tarefa</h2>
-      ${erro ? `<p style="color:red">${esc(erro)}</p>` : ""}
-      <form method="post">
-        <p><label>Título <input name="titulo" required></label></p>
-        <p><label>Descrição <input name="descricao" required></label></p>
-        <p><label>Status
-          <select name="status">
-            <option>Pendente</option><option>Em andamento</option><option>Concluída</option>
-          </select></label></p>
-        <p><label>Responsável
-          <select name="colaborador" required><option value="">Selecione</option>${opcoes}</select></label></p>
-        <p><label>Data de entrega <input name="data" type="date" required></label></p>
-        <button>Cadastrar</button>
-      </form>`,
-      res.locals.usuario,
+      ${mensagemErro(erro)}
+      ${formTarefa("/tarefas", "Cadastrar")}`,
+      usuario,
     ),
   );
 }
 
-app.get("/tarefas", (req, res) => telaTarefas(req, res));
-
-app.post("/tarefas", async (req, res) => {
-  try {
-    await cadastrarTarefa(
-      String(req.body.titulo).trim(),
-      String(req.body.descricao).trim(),
-      String(req.body.status),
-      Number(req.body.colaborador),
-      new Date(`${req.body.data}T12:00:00Z`),
-    );
-    res.redirect("/tarefas");
-  } catch {
-    await telaTarefas(req, res, "Escolha um colaborador cadastrado e uma data válida.");
-  }
-});
-
-// ---------- Agendamento ----------
-app.get("/agendamento", async (_req, res) => {
-  const lista = await listarAgendamentos();
-
+const telaEditar = (res: Response, id: number, t: DadosTarefa, erro = "") =>
   res.send(
     pagina(
-      "Agendamento",
-      tabela(
-        ["Entrega", "Tarefa", "Descrição", "Status", "Responsável", "E-mail"],
-        lista.map((a) =>
-          linha(data(a.data_entrega), a.titulo, a.descricao, a.status, a.colaborador, a.email),
-        ),
-      ),
+      "Editar tarefa",
+      `${mensagemErro(erro)}${formTarefa(`/tarefas/${id}`, "Salvar", t)}<p><a href="/">Voltar</a></p>`,
       res.locals.usuario,
     ),
   );
+
+const naoEncontrada = (res: Response) =>
+  res.status(404).send(pagina("Tarefa não encontrada", `<p><a href="/">Voltar</a></p>`, res.locals.usuario));
+
+app.get("/", (_req, res) => telaTarefas(res));
+
+app.post("/tarefas", async (req, res) => {
+  const dados = lerTarefa(req);
+  if (!tarefaValida(dados)) {
+    res.status(400);
+    await telaTarefas(res, "Preencha o título e a descrição.");
+    return;
+  }
+  await prisma.tarefa.create({ data: { ...dados, usuarioId: res.locals.usuario.id } });
+  res.redirect("/");
+});
+
+app.get("/tarefas/:id", async (req, res) => {
+  const tarefa = await prisma.tarefa.findFirst({ where: { id: idTarefa(req), usuarioId: res.locals.usuario.id } });
+  if (!tarefa) {
+    naoEncontrada(res);
+    return;
+  }
+  telaEditar(res, tarefa.id, tarefa);
+});
+
+app.post("/tarefas/:id", async (req, res) => {
+  const id = idTarefa(req);
+  const dados = lerTarefa(req);
+  if (!tarefaValida(dados)) {
+    res.status(400);
+    telaEditar(res, id, dados, "Preencha o título e a descrição.");
+    return;
+  }
+  const { count } = await prisma.tarefa.updateMany({ where: { id, usuarioId: res.locals.usuario.id }, data: dados });
+  if (count === 0) {
+    naoEncontrada(res);
+    return;
+  }
+  res.redirect("/");
+});
+
+app.post("/tarefas/:id/excluir", async (req, res) => {
+  await prisma.tarefa.deleteMany({ where: { id: idTarefa(req), usuarioId: res.locals.usuario.id } });
+  res.redirect("/");
 });
 
 // ---------- Erros ----------
